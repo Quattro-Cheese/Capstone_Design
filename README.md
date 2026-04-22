@@ -61,7 +61,7 @@ python app.py
 
 ---
 
-## 2. Model
+## 2.  학습 시킬 Model - MediaPipe google 
 
 ```text
 models/pose_landmarker.task
