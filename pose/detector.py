@@ -46,7 +46,9 @@ class PoseDetector:
         result = self._landmarker.detect_for_video(mp_image, timestamp_ms)
 
         image_landmarks = result.pose_landmarks if result.pose_landmarks else None
-        world_landmarks = result.pose_world_landmarks if result.pose_world_landmarks else None
+        world_landmarks = (
+            result.pose_world_landmarks if result.pose_world_landmarks else None
+        )
 
         return PoseResult(
             image_landmarks=image_landmarks,
