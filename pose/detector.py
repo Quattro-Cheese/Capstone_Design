@@ -55,8 +55,7 @@ class PoseDetector:
         )
 
         # image_landmarks에서 visibility 추출
-        # world_landmarks에는 visibility가 없으므로 (MediaPipe 설계 상),
-        # image_landmarks의 visibility를 별도로 넘겨 evaluator에서 신뢰도 판단에 사용
+        # world_landmarks에는 visibility가 없으므로 image_landmarks의 visibility를 별도로 넘겨 evaluator에서 신뢰도 판단에 사용
         visibilities: list[list[float]] = []
         if image_landmarks:
             for pose in image_landmarks:

@@ -33,11 +33,13 @@ def draw_eval_result(frame, result: PoseEvalResult) -> None:
 
     color = COLOR_OK if result.is_correct else COLOR_BAD
 
-    lines = [
-        (f"L elbow: {result.left_elbow_angle:.1f}deg", COLOR_INFO),
-        (f"R elbow: {result.right_elbow_angle:.1f}deg", COLOR_INFO),
-        (result.feedback, color),
-    ]
+    lines = []
+    # -1.0은 visibility 미달로 측정되지 않은 팔 (측면 촬영 시 반대쪽 팔)
+    if result.left_elbow_angle >= 0:
+        lines.append((f"L elbow: {result.left_elbow_angle:.1f}deg", COLOR_INFO))
+    if result.right_elbow_angle >= 0:
+        lines.append((f"R elbow: {result.right_elbow_angle:.1f}deg", COLOR_INFO))
+    lines.append((result.feedback, color))
 
     x, y_start, dy = 10, 30, 30
     for text, c in lines:
