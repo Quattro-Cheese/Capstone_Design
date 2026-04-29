@@ -4,14 +4,14 @@ from pathlib import Path
 import cv2
 
 from pose.detector import PoseDetector
-from pose.visualizer import draw_pose_points
+from pose.evaluator import evaluate_pose
+from pose.visualizer import draw_pose_points, draw_eval_result
 
 
 def main() -> None:
     project_root = Path(__file__).resolve().parent
-    #model_path = project_root / "models" / "pose_landmarker_lite.task"
     model_path = project_root / "models" / "pose_landmarker_full.task"
-    
+
     if not model_path.exists():
         print(f"모델 파일을 찾을 수 없습니다: {model_path}")
         return
@@ -33,12 +33,16 @@ def main() -> None:
             frame = cv2.flip(frame, 1)
 
             pose_result = detector.detect(frame)
+
             draw_pose_points(frame, pose_result.image_landmarks)
+
+            eval_result = evaluate_pose(pose_result.world_landmarks)
+            if eval_result is not None:
+                draw_eval_result(frame, eval_result)
 
             cv2.imshow("CPR MediaPipe Integration", frame)
 
-            key = cv2.waitKey(1) & 0xFF
-            if key == 27:
+            if cv2.waitKey(1) & 0xFF == 27:
                 break
 
     finally:
