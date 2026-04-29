@@ -11,7 +11,6 @@ _RIGHT_ELBOW = 14
 _LEFT_WRIST = 15
 _RIGHT_WRIST = 16
 
-# CPR 자세 기준
 ELBOW_ANGLE_THRESHOLD = 170.0  # degree
 
 # MediaPipe visibility 신뢰도 기준
@@ -35,18 +34,6 @@ class PoseEvalResult:
     right_elbow_angle: float  # 오른쪽 팔꿈치 각도
     is_correct: bool  # 기준 충족 여부
     feedback: str  # 피드백 메시지
-
-
-def _is_visible(landmark) -> bool:
-    """
-    landmark의 visibility가 기준값 이상인지 확인한다.
-
-    MediaPipe는 가려진 관절도 추정값으로 채워서 반환하므로,
-    visibility가 낮은 landmark로 계산된 각도는 신뢰할 수 없다.
-    visibility 속성은 image_landmarks에만 존재하고
-    world_landmarks에는 없으므로 hasattr로 안전하게 접근한다.
-    """
-    return getattr(landmark, "visibility", 1.0) >= VISIBILITY_THRESHOLD
 
 
 def _to_array(landmark) -> np.ndarray:
@@ -78,33 +65,42 @@ def _calculate_angle(a: np.ndarray, b: np.ndarray, c: np.ndarray) -> float:
     return float(angle)
 
 
-def evaluate_pose(world_landmarks) -> PoseEvalResult | None:
+def evaluate_pose(
+    world_landmarks,
+    visibilities: list[list[float]] | None = None,
+) -> PoseEvalResult | None:
     """
     world_landmarks로부터 팔꿈치 각도를 계산하고 자세를 평가한다.
 
+    각도 계산과 visibility 판단을 분리하는 이유:
+    - 각도 계산: world_landmarks 사용 (3D 실세계 좌표, 카메라 각도 왜곡 없음)
+    - visibility 판단: image_landmarks의 visibility 사용 (world_landmarks에는 없음)
+
     판정 기준:
+    - 6개 landmark(양팔 어깨·팔꿈치·손목) visibility 모두 0.5 이상이어야 판정
     - 양쪽 팔꿈치 각도를 모두 측정
     - 더 낮은 쪽(더 구부러진 쪽)을 기준으로 판정 (보수적 평가)
     - ELBOW_ANGLE_THRESHOLD(170°) 이상이면 올바른 자세로 판정
 
     Args:
         world_landmarks: PoseDetector.detect()의 PoseResult.world_landmarks
-                         (None이면 None 반환)
+        visibilities: PoseDetector.detect()의 PoseResult.visibilities
+                      (None이면 visibility 체크 생략)
 
     Returns:
-        PoseEvalResult 또는 None (landmark 미검출 시)
+        PoseEvalResult 또는 None (landmark 미검출 또는 visibility 미달 시)
     """
     if not world_landmarks:
         return None
 
     lm = world_landmarks[0]  # 첫 번째 사람
 
-    # visibility 체크: 6개 landmark 중 하나라도 신뢰도 미달이면 판정 불가
-    # world_landmarks에는 visibility가 없으므로 getattr fallback(기본값 1.0)으로 처리
-    # → world_landmarks만 쓸 경우 항상 통과하므로, 추후 image_landmarks의
-    #   visibility를 함께 전달하는 방식으로 개선 가능
-    if not all(_is_visible(lm[i]) for i in _ARM_LANDMARK_INDICES):
-        return None
+    # visibility 체크: image_landmarks의 visibility로 신뢰도 판단
+    # visibilities가 전달된 경우에만 실제 체크 수행
+    if visibilities:
+        vis = visibilities[0]  # 첫 번째 사람의 visibility 리스트
+        if not all(vis[i] >= VISIBILITY_THRESHOLD for i in _ARM_LANDMARK_INDICES):
+            return None
 
     left_angle = _calculate_angle(
         _to_array(lm[_LEFT_SHOULDER]),

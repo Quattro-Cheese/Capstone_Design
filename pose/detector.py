@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 import cv2
@@ -14,7 +14,11 @@ from mediapipe.tasks.python import vision
 class PoseResult:
     image_landmarks: Optional[list]
     world_landmarks: Optional[list]
-    timestamp_ms: int
+    # image_landmarks에서 추출한 landmark별 visibility 리스트
+    # 각도 계산은 world_landmarks로, 신뢰도 판단은 image_landmarks로 수행하기 위해 분리
+    # shape: List[List[float]] — [사람 인덱스][landmark 인덱스] = visibility(0~1)
+    visibilities: list[list[float]] = field(default_factory=list)
+    timestamp_ms: int = 0
 
 
 class PoseDetector:
@@ -50,9 +54,18 @@ class PoseDetector:
             result.pose_world_landmarks if result.pose_world_landmarks else None
         )
 
+        # image_landmarks에서 visibility 추출
+        # world_landmarks에는 visibility가 없으므로 (MediaPipe 설계 상),
+        # image_landmarks의 visibility를 별도로 넘겨 evaluator에서 신뢰도 판단에 사용
+        visibilities: list[list[float]] = []
+        if image_landmarks:
+            for pose in image_landmarks:
+                visibilities.append([lm.visibility for lm in pose])
+
         return PoseResult(
             image_landmarks=image_landmarks,
             world_landmarks=world_landmarks,
+            visibilities=visibilities,
             timestamp_ms=timestamp_ms,
         )
 

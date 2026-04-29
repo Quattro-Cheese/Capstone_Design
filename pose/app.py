@@ -36,7 +36,10 @@ def main() -> None:
 
             draw_pose_points(frame, pose_result.image_landmarks)
 
-            eval_result = evaluate_pose(pose_result.world_landmarks)
+            eval_result = evaluate_pose(
+                pose_result.world_landmarks,
+                pose_result.visibilities,
+            )
             if eval_result is not None:
                 draw_eval_result(frame, eval_result)
 
