@@ -4,8 +4,6 @@ from dataclasses import dataclass
 
 import numpy as np
 
-# MediaPipe Pose Landmark 인덱스
-# https://ai.google.dev/edge/mediapipe/solutions/vision/pose_landmarker
 _LEFT_SHOULDER = 11
 _RIGHT_SHOULDER = 12
 _LEFT_ELBOW = 13
@@ -13,8 +11,22 @@ _RIGHT_ELBOW = 14
 _LEFT_WRIST = 15
 _RIGHT_WRIST = 16
 
-# CPR 자세 기준 (AHA 2020 가이드라인: 팔을 곧게 펴서 체중으로 압박)
-ELBOW_ANGLE_THRESHOLD = 170.0  # 도(degree)
+# CPR 자세 기준
+ELBOW_ANGLE_THRESHOLD = 170.0  # degree
+
+# MediaPipe visibility 신뢰도 기준
+# 0~1 사이 값, 0.5 미만이면 가려지거나 추정 신뢰도가 낮은 landmark
+VISIBILITY_THRESHOLD = 0.5
+
+# 각도 계산에 필요한 landmark 인덱스 (양팔 어깨·팔꿈치·손목)
+_ARM_LANDMARK_INDICES = [
+    _LEFT_SHOULDER,
+    _LEFT_ELBOW,
+    _LEFT_WRIST,
+    _RIGHT_SHOULDER,
+    _RIGHT_ELBOW,
+    _RIGHT_WRIST,
+]
 
 
 @dataclass
@@ -23,6 +35,18 @@ class PoseEvalResult:
     right_elbow_angle: float  # 오른쪽 팔꿈치 각도
     is_correct: bool  # 기준 충족 여부
     feedback: str  # 피드백 메시지
+
+
+def _is_visible(landmark) -> bool:
+    """
+    landmark의 visibility가 기준값 이상인지 확인한다.
+
+    MediaPipe는 가려진 관절도 추정값으로 채워서 반환하므로,
+    visibility가 낮은 landmark로 계산된 각도는 신뢰할 수 없다.
+    visibility 속성은 image_landmarks에만 존재하고
+    world_landmarks에는 없으므로 hasattr로 안전하게 접근한다.
+    """
+    return getattr(landmark, "visibility", 1.0) >= VISIBILITY_THRESHOLD
 
 
 def _to_array(landmark) -> np.ndarray:
@@ -74,6 +98,13 @@ def evaluate_pose(world_landmarks) -> PoseEvalResult | None:
         return None
 
     lm = world_landmarks[0]  # 첫 번째 사람
+
+    # visibility 체크: 6개 landmark 중 하나라도 신뢰도 미달이면 판정 불가
+    # world_landmarks에는 visibility가 없으므로 getattr fallback(기본값 1.0)으로 처리
+    # → world_landmarks만 쓸 경우 항상 통과하므로, 추후 image_landmarks의
+    #   visibility를 함께 전달하는 방식으로 개선 가능
+    if not all(_is_visible(lm[i]) for i in _ARM_LANDMARK_INDICES):
+        return None
 
     left_angle = _calculate_angle(
         _to_array(lm[_LEFT_SHOULDER]),
