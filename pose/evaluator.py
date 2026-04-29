@@ -13,8 +13,8 @@ _RIGHT_ELBOW = 14
 _LEFT_WRIST = 15
 _RIGHT_WRIST = 16
 
-# 팔이 곧게 펴진 것으로 판정하는 최소 각도 (AHA 2020 기준 170°, 2D 카메라 오차 감안해 160°로 설정)
-ELBOW_ANGLE_THRESHOLD = 160.0
+# 팔이 곧게 펴진 것으로 판정하는 최소 각도 (AHA 2020 기준 170°)
+ELBOW_ANGLE_THRESHOLD = 170.0
 
 # 압박 중(DOWN) 전환 기준: 이 각도 미만이면 팔이 충분히 굽혀진 것으로 판단
 DOWN_THRESHOLD = 130.0
