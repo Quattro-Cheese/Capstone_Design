@@ -152,9 +152,9 @@ def evaluate_pose(
         is_correct = min_angle >= CORRECT_THRESHOLD
 
     feedback = (
-        "자세 정확: 팔이 곧게 펴져 있습니다"
+        "Good: Arms are straight"
         if is_correct
-        else f"팔을 더 펴세요 ({CORRECT_THRESHOLD - min_angle:.1f}° 부족)"
+        else f"Straighten your arms ({CORRECT_THRESHOLD - min_angle:.1f}deg short)"
     )
 
     return PoseEvalResult(
