@@ -21,10 +21,8 @@ void loop()
   digitalWrite(TRIG, LOW);
   duration = pulseIn(ECHO, HIGH);
   distance = duration * 17 / 1000;
-  Serial.println(duration);
-  Serial.print("\nDIstance : ");
-  Serial.print(distance);
-  Serial.println(" Cm");
+  Serial.print("DIST:");
+  Serial.println(distance);
 
   if (distance >= 10 && distance <= 11)
   {
@@ -36,5 +34,5 @@ void loop()
     digitalWrite(GREEN, LOW);
     digitalWrite(RED, HIGH);
   }
-  delay(1000);
+  delay(60);
 }
