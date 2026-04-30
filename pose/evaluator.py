@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum, auto
 
 import numpy as np
 
@@ -13,89 +12,64 @@ _RIGHT_ELBOW = 14
 _LEFT_WRIST = 15
 _RIGHT_WRIST = 16
 
-# 팔이 곧게 펴진 것으로 판정하는 최소 각도 (AHA 2020 기준 170°)
-ELBOW_ANGLE_THRESHOLD = 170.0
-
-# 압박 중(DOWN) 전환 기준: 이 각도 미만이면 팔이 충분히 굽혀진 것으로 판단
-DOWN_THRESHOLD = 130.0
-
-# 복귀(UP) 전환 기준: DOWN 이후 이 각도 이상이면 업스트로크 정점으로 판단 → 자세 판정 시점
-UP_THRESHOLD = 150.0
+# 히스테리시스 임계값
+# 논문 근거: Weiss et al. (2023), Advances in Simulation — CPR 포즈 추정 연구에서 170°를 기준으로 사용
+# 단, MediaPipe 2D 단일 카메라의 측정 오차(±8°)를 감안해 상하한을 분리 설정
+# 실측 데이터 기반으로 마네킹 대여 기간(4/14~4/20)에 재조정 예정
+CORRECT_THRESHOLD = 163.0  # 이 각도 이상이면 "정확"으로 전환
+INCORRECT_THRESHOLD = 157.0  # 이 각도 미만이면 "부정확"으로 전환
+# 157°~163° 구간에서는 이전 상태를 유지해 측정 노이즈로 인한 판정 깜빡임을 방지
 
 # landmark visibility가 이 값 미만이면 신뢰도가 낮아 각도 계산에서 제외
 VISIBILITY_THRESHOLD = 0.5
-
-
-class CprStage(Enum):
-    IDLE = auto()  # 초기 상태 또는 CPR 동작 미감지
-    DOWN = auto()  # 압박 중 (팔 굽힘)
-    UP = auto()  # 압박 후 복귀 (팔 펴짐) — 이 전환 시점에서 자세를 판정
 
 
 @dataclass
 class PoseEvalResult:
     left_elbow_angle: float  # 왼팔 팔꿈치 각도 (visibility 미달 시 -1.0)
     right_elbow_angle: float  # 오른팔 팔꿈치 각도 (visibility 미달 시 -1.0)
-    is_correct: bool  # ELBOW_ANGLE_THRESHOLD 충족 여부
+    is_correct: bool  # 팔꿈치 각도가 기준을 충족하는지 여부
     feedback: str  # 사용자에게 보여줄 피드백 메시지
-    stage: CprStage  # 판정 시점의 Stage
 
 
-class CprStageDetector:
-    """매 프레임 팔꿈치 각도를 받아 CPR Stage를 추적하고, DOWN→UP 전환 시점에 자세를 판정한다."""
+class HysteresisJudge:
+    """
+    히스테리시스 방식으로 팔꿈치 각도를 판정한다.
+
+    히스테리시스란:
+      "정확" 판정으로 바뀌는 기준(CORRECT_THRESHOLD)과
+      "부정확" 판정으로 바뀌는 기준(INCORRECT_THRESHOLD)을 다르게 설정하는 방식.
+
+      예시 (CORRECT=163°, INCORRECT=157°):
+        현재 부정확 상태 → 163° 이상이 돼야 정확으로 전환
+        현재 정확 상태   → 157° 미만이 돼야 부정확으로 전환
+        157°~163° 구간   → 이전 상태 유지 (전환 없음)
+
+      이렇게 하면 MediaPipe 측정 노이즈(±5° 내외)로 인해
+      판정이 매 프레임 초록/빨강으로 깜빡이는 문제를 방지할 수 있다.
+    """
 
     def __init__(self) -> None:
-        self._stage = CprStage.IDLE
-        self._last_result: PoseEvalResult | None = None
+        # 초기 상태는 부정확으로 시작 (측정 전 상태)
+        self._is_correct = False
 
-    @property
-    def stage(self) -> CprStage:
-        return self._stage
-
-    @property
-    def last_result(self) -> PoseEvalResult | None:
-        """가장 최근 판정 결과 — UP 전환 후 다음 판정 전까지 유지됨"""
-        return self._last_result
-
-    def update(
-        self,
-        angle: float,
-        left_angle: float | None,
-        right_angle: float | None,
-    ) -> PoseEvalResult | None:
+    def update(self, angle: float) -> bool:
         """
-        Stage를 갱신하고, DOWN→UP 전환 시점에만 PoseEvalResult를 반환한다.
-        그 외 프레임에서는 None을 반환한다.
+        현재 각도로 판정 상태를 갱신하고 결과를 반환한다.
+
+        - 현재 부정확 상태: angle >= CORRECT_THRESHOLD 이면 정확으로 전환
+        - 현재 정확 상태:   angle <  INCORRECT_THRESHOLD 이면 부정확으로 전환
+        - 그 사이 구간:     이전 상태 유지
         """
-        prev_stage = self._stage
-
-        if angle < DOWN_THRESHOLD:
-            self._stage = CprStage.DOWN
-        elif angle >= UP_THRESHOLD and prev_stage in (CprStage.DOWN, CprStage.IDLE):
-            self._stage = CprStage.UP
-
-        # DOWN→UP 전환 = 업스트로크 정점 → 이 시점에서만 자세 판정
-        if self._stage == CprStage.UP and prev_stage == CprStage.DOWN:
-            is_correct = angle >= ELBOW_ANGLE_THRESHOLD
-            feedback = (
-                "자세 정확: 팔이 곧게 펴져 있습니다"
-                if is_correct
-                else f"팔을 더 펴세요 ({ELBOW_ANGLE_THRESHOLD - angle:.1f}° 부족)"
-            )
-            self._last_result = PoseEvalResult(
-                left_elbow_angle=left_angle if left_angle is not None else -1.0,
-                right_elbow_angle=right_angle if right_angle is not None else -1.0,
-                is_correct=is_correct,
-                feedback=feedback,
-                stage=self._stage,
-            )
-            return self._last_result
-
-        return None
+        if not self._is_correct and angle >= CORRECT_THRESHOLD:
+            self._is_correct = True
+        elif self._is_correct and angle < INCORRECT_THRESHOLD:
+            self._is_correct = False
+        return self._is_correct
 
     def reset(self) -> None:
-        """landmark를 잃었을 때 Stage를 초기화한다."""
-        self._stage = CprStage.IDLE
+        """landmark를 잃었을 때 판정 상태를 초기화한다."""
+        self._is_correct = False
 
 
 def _to_pixel(landmark, width: int, height: int) -> np.ndarray:
@@ -116,15 +90,15 @@ def evaluate_pose(
     frame_width: int,
     frame_height: int,
     visibilities: list[list[float]] | None = None,
-    stage_detector: CprStageDetector | None = None,
+    hysteresis: HysteresisJudge | None = None,
 ) -> PoseEvalResult | None:
     """
-    팔꿈치 각도를 계산하고 stage_detector에 전달한다.
-    stage_detector가 None이면 매 프레임 즉시 판정한다 (테스트용).
+    팔꿈치 각도를 계산하고 히스테리시스 판정기로 자세를 평가한다.
+    hysteresis가 None이면 단순 임계값으로 즉시 판정한다 (테스트용).
     """
     if not image_landmarks:
-        if stage_detector is not None:
-            stage_detector.reset()
+        if hysteresis is not None:
+            hysteresis.reset()
         return None
 
     lm = image_landmarks[0]
@@ -146,8 +120,8 @@ def evaluate_pose(
         )
 
     if not left_visible and not right_visible:
-        if stage_detector is not None:
-            stage_detector.reset()
+        if hysteresis is not None:
+            hysteresis.reset()
         return None
 
     left_angle: float | None = None
@@ -166,23 +140,26 @@ def evaluate_pose(
             _to_pixel(lm[_RIGHT_WRIST], frame_width, frame_height),
         )
 
-    # 보이는 팔 중 더 구부러진 쪽을 기준으로 Stage 판정
+    # 보이는 팔 중 더 구부러진 쪽을 기준으로 판정
     visible_angles = [a for a in [left_angle, right_angle] if a is not None]
     min_angle = min(visible_angles)
 
-    if stage_detector is not None:
-        return stage_detector.update(min_angle, left_angle, right_angle)
+    # 히스테리시스 판정
+    if hysteresis is not None:
+        is_correct = hysteresis.update(min_angle)
+    else:
+        # 테스트용 단순 임계값 판정
+        is_correct = min_angle >= CORRECT_THRESHOLD
 
-    # 테스트용 즉시 판정
-    is_correct = min_angle >= ELBOW_ANGLE_THRESHOLD
+    feedback = (
+        "자세 정확: 팔이 곧게 펴져 있습니다"
+        if is_correct
+        else f"팔을 더 펴세요 ({CORRECT_THRESHOLD - min_angle:.1f}° 부족)"
+    )
+
     return PoseEvalResult(
         left_elbow_angle=left_angle if left_angle is not None else -1.0,
         right_elbow_angle=right_angle if right_angle is not None else -1.0,
         is_correct=is_correct,
-        feedback=(
-            "자세 정확: 팔이 곧게 펴져 있습니다"
-            if is_correct
-            else f"팔을 더 펴세요 ({ELBOW_ANGLE_THRESHOLD - min_angle:.1f}° 부족)"
-        ),
-        stage=CprStage.IDLE,
+        feedback=feedback,
     )
